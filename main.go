@@ -107,6 +107,39 @@ func (c *commands) register(name string, f func(*state, command) error){
 	c.handlers[name] = f
 }
 
+func handlerFollow(s *state, cmd command) error {
+
+	if len(cmd.Arguments) < 1 {
+		return fmt.Errorf("No URL provided")
+	}
+
+	user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
+
+	if err != nil {
+    return err
+	}
+
+	url := cmd.Arguments[0]
+
+	getFeedID, err := s.db.GetFeedByURL(context.Background(), url)
+
+	if err != nil {
+    return err
+	}
+
+	createFeed, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		UserID: user.ID,
+		FeedID: getFeedID,
+	})
+
+	if err != nil {
+    return err
+	}
+
+	fmt.Printf("Feed %s created for user %s\n", createFeed.FeedName, createFeed.UserName)
+	return nil
+}
+
 func handlerFeeds(s *state, cmd command) error {
 
 	dbs, err := s.db.GetFeeds(context.Background())
@@ -133,7 +166,7 @@ func handlerFeed(s *state, cmd command) error{
 	user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
 	if err != nil {
     return err
-}
+	}
 
 	name := cmd.Arguments[0]
 
@@ -152,7 +185,20 @@ func handlerFeed(s *state, cmd command) error{
 		return err
 	}
 
+	
+
 	fmt.Println(feed)
+
+	createFeed, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	})
+
+	if err != nil {
+    return err
+	}
+
+	fmt.Printf("Feed %s created for user %s\n", createFeed.FeedName, createFeed.UserName)
 	return nil
 
 }
@@ -291,6 +337,7 @@ func main(){
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
 
 	err = cmds.run(&s, cmd)
 
