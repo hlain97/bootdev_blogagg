@@ -13,7 +13,6 @@ _ "github.com/lib/pq"
 "io"
 "net/http"
 "html"
-
 "github.com/google/uuid"
 "github.com/hlain97/blog/internal/config"
 "github.com/hlain97/blog/internal/database"
