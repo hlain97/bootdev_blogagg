@@ -9,6 +9,10 @@ import (
 _ "github.com/lib/pq"
 "time"
 "context"
+"encoding/xml"
+"io"
+"net/http"
+"html"
 
 "github.com/google/uuid"
 "github.com/hlain97/blog/internal/config"
@@ -30,6 +34,64 @@ type command struct {
 	Arguments []string
 }
 
+type RSSFeed struct {
+	Channel struct {
+		Title       string    `xml:"title"`
+		Link        string    `xml:"link"`
+		Description string    `xml:"description"`
+		Item        []RSSItem `xml:"item"`
+	} `xml:"channel"`
+}
+
+type RSSItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+}
+
+func fetchFeed (ctx context.Context, feedURL string)(*RSSFeed, error){
+	newFeed := &RSSFeed{}
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+
+	if err != nil{
+		return nil, err
+	}
+
+	req.Header.Add("User-Agent", "gator")
+
+	res, err := http.DefaultClient.Do(req)
+
+	if err != nil{
+		return nil, err
+	}
+
+	defer res.Body.Close()
+
+	read, err := io.ReadAll(res.Body)
+
+	if err != nil{
+		return nil, err
+	}
+
+	err = xml.Unmarshal(read, newFeed)
+
+	if err != nil{
+		return nil, err
+	}
+
+	for i := range newFeed.Channel.Item {
+		newFeed.Channel.Item[i].Title = html.UnescapeString(newFeed.Channel.Item[i].Title)
+		newFeed.Channel.Item[i].Description = html.UnescapeString(newFeed.Channel.Item[i].Description)
+	}
+
+	newFeed.Channel.Title = html.UnescapeString(newFeed.Channel.Title)
+	newFeed.Channel.Description = html.UnescapeString(newFeed.Channel.Description)
+
+
+	return newFeed, nil
+}
+
 func (c *commands) run(s *state, cmd command) error{
 
 	handler, ok := c.handlers[cmd.Name]
@@ -44,6 +106,70 @@ func (c *commands) run(s *state, cmd command) error{
 func (c *commands) register(name string, f func(*state, command) error){
 	c.handlers[name] = f
 }
+
+func handlerFeeds(s *state, cmd command) error {
+
+	dbs, err := s.db.GetFeeds(context.Background())
+
+	if err != nil {
+		return err
+	}
+
+	for _, feed := range dbs {
+		fmt.Println(feed.Name)
+		fmt.Println(feed.Url)
+		fmt.Println(feed.UserName)
+	}
+
+	return nil
+
+}
+
+func handlerFeed(s *state, cmd command) error{
+	if len(cmd.Arguments) < 2 {
+		return fmt.Errorf("No name provided")
+	}
+
+	user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
+	if err != nil {
+    return err
+}
+
+	name := cmd.Arguments[0]
+
+	params := database.CreateFeedParams{
+		ID:	uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt:	time.Now(),
+		Name: name,
+		Url: cmd.Arguments[1],
+		UserID: user.ID,
+	}
+
+	feed, err := s.db.CreateFeed(context.Background(), params)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(feed)
+	return nil
+
+}
+
+
+func handlerAgg(s *state, cmd command) error {
+	feed, err := fetchFeed(context.Background(),"https://www.wagslane.dev/index.xml")
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%+v\n", feed)
+
+	return nil
+}
+
 
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.Arguments) < 1 {
@@ -162,6 +288,9 @@ func main(){
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	err = cmds.run(&s, cmd)
 
