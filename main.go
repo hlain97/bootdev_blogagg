@@ -106,16 +106,24 @@ func (c *commands) register(name string, f func(*state, command) error){
 	c.handlers[name] = f
 }
 
-func handlerFollow(s *state, cmd command) error {
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
+
+		if err != nil {
+    		return err
+		}
+
+		return handler(s, cmd, user)
+	}
+
+}
+
+func handlerFollow(s *state, cmd command, user database.User) error {
 
 	if len(cmd.Arguments) < 1 {
 		return fmt.Errorf("No URL provided")
-	}
-
-	user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
-
-	if err != nil {
-    return err
 	}
 
 	url := cmd.Arguments[0]
@@ -139,6 +147,47 @@ func handlerFollow(s *state, cmd command) error {
 	return nil
 }
 
+func handlerUnfollow(s *state, cmd command, user database.User) error{
+	if len(cmd.Arguments) < 1 {
+		return fmt.Errorf("No URL provided")
+	}
+
+	url := cmd.Arguments[0]
+
+	getFeedID, err := s.db.GetFeedByURL(context.Background(), url)
+
+	if err != nil {
+    return err
+	}
+
+	err = s.db.DeleteFeedFollow(context.Background(), database.DeleteFeedFollowParams{
+		UserID: user.ID,
+		FeedID: getFeedID,
+	})
+
+	if err != nil {
+    return err
+	}
+	return nil
+}
+
+func handlerGetFeedFollow(s *state, cmd command, user database.User) error {
+
+	dbs, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+
+	if err != nil {
+		return err
+	}
+
+	for _, row := range dbs {
+		fmt.Println(row.FeedName)
+	}
+
+
+	return nil
+
+}
+
 func handlerFeeds(s *state, cmd command) error {
 
 	dbs, err := s.db.GetFeeds(context.Background())
@@ -157,14 +206,9 @@ func handlerFeeds(s *state, cmd command) error {
 
 }
 
-func handlerFeed(s *state, cmd command) error{
+func handlerFeed(s *state, cmd command, user database.User) error{
 	if len(cmd.Arguments) < 2 {
 		return fmt.Errorf("No name provided")
-	}
-
-	user, err := s.db.GetUser(context.Background(), s.Config.CurrentUserName)
-	if err != nil {
-    return err
 	}
 
 	name := cmd.Arguments[0]
@@ -334,9 +378,11 @@ func main(){
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerFeed))
 	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", handlerFollow)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerGetFeedFollow))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	err = cmds.run(&s, cmd)
 
